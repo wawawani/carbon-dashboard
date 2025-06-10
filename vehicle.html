@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>차량 탄소발자국 - 부경대학교</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+    <style>
+        .sidebar { /* 생략: 기존 CSS 유지 */ }
+        .main-content { /* 생략 */ }
+        .card { /* 생략 */ }
+        .loading { /* 생략 */ }
+        .spinner { /* 생략 */ }
+        @keyframes spin { /* 생략 */ }
+        .error-message { /* 생략 */ }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <!-- 로딩 스피너 -->
+    <div id="loading" class="loading">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- 사이드바 -->
+    <div class="sidebar text-white">
+        <!-- … (사이드바 내용 그대로) … -->
+    </div>
+
+    <!-- 메인 콘텐츠 -->
+    <div class="main-content">
+        <!-- 헤더 -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold">차량</h1>
+            <div class="flex items-center">
+                <div class="relative mr-4">
+                    <select id="yearSelector" class="bg-white border rounded-md px-4 py-2 pr-8">
+                        <option value="2025">2025년</option>
+                        <option value="2024">2024년</option>
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+                        <i class="fas fa-chevron-down"></i>
+                    </div>
+                </div>
+                <button id="refreshBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                    <i class="fas fa-sync-alt mr-2"></i>새로고침
+                </button>
+            </div>
+        </div>
+
+        <!-- 에러 메시지 -->
+        <div id="errorMessage" class="error-message">
+            <i class="fas fa-exclamation-triangle mr-2"></i>
+            <span id="errorText"></span>
+        </div>
+
+        <!-- 요약 섹션 -->
+        <div class="mb-6">
+            <p class="text-gray-500 mb-2">Summary</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <!-- 한달 차량 대수 -->
+                <div class="card p-4 rounded-lg shadow flex items-center">
+                    <div class="mr-4 bg-green-500 text-white p-3 rounded-full">
+                        <i class="fas fa-car text-xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500">한달 차량 대수</p>
+                        <p id="totalVehicles" class="text-xl font-bold">-</p>
+                    </div>
+                </div>
+                <!-- 총 차량 일간 탄소 배출량 -->
+                <div class="card p-4 rounded-lg shadow flex items-center">
+                    <div class="mr-4 bg-blue-500 text-white p-3 rounded-full">
+                        <i class="fas fa-calendar-day text-xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500">총 차량 일간 탄소 배출량</p>
+                        <p id="dailyEmissions" class="text-xl font-bold">- tCO₂eq</p>
+                    </div>
+                </div>
+                <!-- 총 차량 월간 탄소 배출량 -->
+                <div class="card p-4 rounded-lg shadow flex items-center">
+                    <div class="mr-4 bg-red-500 text-white p-3 rounded-full">
+                        <i class="fas fa-calendar-alt text-xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500">총 차량 월간 탄소 배출량</p>
+                        <p id="monthlyEmissions" class="text-xl font-bold">- tCO₂eq</p>
+                    </div>
+                </div>
+                <!-- 셔틀버스 부문 탄소 배출량 -->
+                <div class="card p-4 rounded-lg shadow flex items-center">
+                    <div class="mr-4 bg-yellow-500 text-white p-3 rounded-full">
+                        <i class="fas fa-bus text-xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500">셔틀버스 부문 탄소 배출량</p>
+                        <p id="shuttleEmissions" class="text-xl font-bold">- tCO₂eq</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 차트 그리드 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div class="card">
+                <h3 class="text-lg font-semibold mb-4">일별 탄소 배출량 추이</h3>
+                <canvas id="dailyEmissionsChart" class="h-64"></canvas>
+            </div>
+            <div class="card">
+                <h3 class="text-lg font-semibold mb-4">월별 탄소 배출량 추이</h3>
+                <canvas id="monthlyEmissionsChart" class="h-64"></canvas>
+            </div>
+        </div>
+        <div class="card mb-6">
+            <h3 class="text-lg font-semibold mb-4">실시간 차량 탄소 배출량 (최근 7일)</h3>
+            <canvas id="realTimeEmissionsChart" class="h-96"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:8080'; // 또는 'http://127.0.0.1:8080'
+
+        let dailyEmissionsChart, monthlyEmissionsChart, realTimeEmissionsChart;
+
+        function initCharts() {
+            // 일별 차트
+            const dailyCtx = document.getElementById('dailyEmissionsChart').getContext('2d');
+            dailyEmissionsChart = new Chart(dailyCtx, {
+                type: 'line',
+                data: { labels: [], datasets: [{ label: '일별 탄소 배출량 (tCO₂eq)', data: [], tension: 0.4, fill: true }] },
+                options: { scales: { y: { beginAtZero: true } }, responsive: true }
+            });
+
+            // 월별 차트
+            const monthlyCtx = document.getElementById('monthlyEmissionsChart').getContext('2d');
+            monthlyEmissionsChart = new Chart(monthlyCtx, {
+                type: 'bar',
+                data: { labels: [], datasets: [{ label: '월별 탄소 배출량 (tCO₂eq)', data: [], }] },
+                options: { scales: { y: { beginAtZero: true } }, responsive: true }
+            });
+
+            // 실시간(최근 7일) 차트
+            const realCtx = document.getElementById('realTimeEmissionsChart').getContext('2d');
+            realTimeEmissionsChart = new Chart(realCtx, {
+                type: 'line',
+                data: { labels: [], datasets: [{ label: '최근 7일 배출량 (tCO₂eq)', data: [], tension: 0.4, fill: true }] },
+                options: { scales: { y: { beginAtZero: true } }, responsive: true }
+            });
+        }
+
+        async function loadData() {
+            try {
+                document.getElementById('loading').style.display = 'block';
+                const res = await fetch(`/api/emissions/vehicle`);
+                if (!res.ok) throw new Error('데이터를 불러오는 중 오류가 발생했습니다.');
+                const data = await res.json(); // [{날짜, 탄소배출량}, ...]
+
+                updateCharts(data);
+                updateSummary(data);
+
+            } catch (err) {
+                document.getElementById('errorText').textContent = err.message;
+                document.getElementById('errorMessage').style.display = 'block';
+                setTimeout(() => document.getElementById('errorMessage').style.display = 'none', 5000);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function updateCharts(data) {
+            // 일별
+            const dates = data.map(d => d['날짜']);
+            const values = data.map(d => d['탄소배출량']);
+            dailyEmissionsChart.data.labels = dates;
+            dailyEmissionsChart.data.datasets[0].data = values;
+            dailyEmissionsChart.update();
+
+            // 월별
+            const monthlyMap = {};
+            data.forEach(d => {
+                const m = d['날짜'].slice(0,7);
+                monthlyMap[m] = (monthlyMap[m]||0) + d['탄소배출량'];
+            });
+            const months = Object.keys(monthlyMap).sort();
+            const monthVals = months.map(m => monthlyMap[m]);
+            monthlyEmissionsChart.data.labels = months;
+            monthlyEmissionsChart.data.datasets[0].data = monthVals;
+            monthlyEmissionsChart.update();
+
+            // 실시간(최근 7일)
+            const lastDates = dates.slice(-7);
+            const lastVals = values.slice(-7);
+            realTimeEmissionsChart.data.labels = lastDates;
+            realTimeEmissionsChart.data.datasets[0].data = lastVals;
+            realTimeEmissionsChart.update();
+        }
+
+        function updateSummary(data) {
+            // 평균 일간 배출량
+            const total = data.reduce((s, d) => s + d['탄소배출량'], 0);
+            const avgDaily = (data.length ? total / data.length : 0).toFixed(2);
+            document.getElementById('dailyEmissions').textContent = `${avgDaily} tCO₂eq`;
+
+            // 총 월간 배출량
+            document.getElementById('monthlyEmissions').textContent = `${total.toFixed(2)} tCO₂eq`;
+
+            // 아직 API에 없는 데이터는 '-' 처리
+            document.getElementById('totalVehicles').textContent = `-`;
+            document.getElementById('shuttleEmissions').textContent = `-`;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            loadData();
+            document.getElementById('refreshBtn').addEventListener('click', loadData);
+            document.getElementById('yearSelector').addEventListener('change', loadData);
+        });
+    </script>
+</body>
+</html>
